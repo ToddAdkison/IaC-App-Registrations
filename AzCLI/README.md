@@ -29,7 +29,7 @@ apiPermissions: "User.Read openid profile offline_access"
 ```yaml
 appDisplayName: "Customer Portal - Production"
 signInAudience: "AzureADMultipleOrgs"
-redirectUris: >
+redirectUris:
   https://portal.company.com/signin-oidc
   https://localhost:3000
   https://staging-portal.company.com/signin-oidc
