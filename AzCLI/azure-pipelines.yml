@@ -1,0 +1,79 @@
+trigger:
+  branches:
+    include:
+      - main
+
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - staging
+      - prod
+
+variables:
+  - group: appreg-secrets
+  - name: appDisplayName
+    value: 'myapp-${{ parameters.environment }}'
+
+stages:
+
+  # ── Stage 1: Validate ─────────────────────────────────────────────
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: ValidateScript
+        displayName: Lint & Validate Script
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Bash@3
+            displayName: Install shellcheck
+            inputs:
+              targetType: inline
+              script: sudo apt-get install -y shellcheck
+
+          - task: Bash@3
+            displayName: Lint shell script
+            inputs:
+              targetType: inline
+              script: shellcheck scripts/create-app-registration.sh
+
+  # ── Stage 2: Deploy ───────────────────────────────────────────────
+  - stage: Deploy
+    displayName: Deploy
+    dependsOn: Validate
+    jobs:
+      - deployment: CreateAppRegistration
+        displayName: Create App Registration
+        pool:
+          vmImage: ubuntu-latest
+        environment: ${{ parameters.environment }}   # ← enables approval gates
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: Login & Create App Registration
+                  name: appRegStep
+                  inputs:
+                    azureSubscription: 'sc-appreg-pipeline'
+                    scriptType: bash
+                    scriptLocation: scriptPath
+                    scriptPath: scripts/create-app-registration.sh
+                    arguments: '$(appDisplayName) ${{ parameters.environment }}'
+                  env:
+                    AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
+                    AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
+                    AZURE_TENANT_ID: $(AZURE_TENANT_ID)
+
+                - task: Bash@3
+                  displayName: Print App ID
+                  inputs:
+                    targetType: inline
+                    script: echo "App Registration ID → $(appRegStep.APP_ID)"

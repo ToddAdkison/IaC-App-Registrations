@@ -1,0 +1,23 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  azureServiceConnection: 'Bicep-AppReg'
+  location: 'eastus'
+
+steps:
+- task: AzureCLI@2
+  displayName: 'Deploy Bicep App Registration'
+  inputs:
+    azureSubscription: $(azureServiceConnection)
+    workingDirectory: 'Bicep'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      az deployment tenant create \
+        --name app-registration-deployment \
+        --location $(location) \
+        --template-file main.bicep
