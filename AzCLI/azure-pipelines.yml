@@ -3,77 +3,103 @@ trigger:
     include:
       - main
 
+pr: none
+
 parameters:
-  - name: environment
-    displayName: Target Environment
+  - name: configFile
+    displayName: 'Config File Path'
     type: string
-    default: dev
-    values:
-      - dev
-      - staging
-      - prod
+    default: '/AzCLI/app-config.yml'
+
+pool:
+  vmImage: 'ubuntu-latest'
 
 variables:
-  - group: appreg-secrets
-  - name: appDisplayName
-    value: 'myapp-${{ parameters.environment }}'
+  azureServiceConnection: 'AzCLI-AppReg'
 
-stages:
+steps:
+  - checkout: self
+    clean: true
 
-  # ── Stage 1: Validate ─────────────────────────────────────────────
-  - stage: Validate
-    displayName: Validate
-    jobs:
-      - job: ValidateScript
-        displayName: Lint & Validate Script
-        pool:
-          vmImage: ubuntu-latest
-        steps:
-          - task: Bash@3
-            displayName: Install shellcheck
-            inputs:
-              targetType: inline
-              script: sudo apt-get install -y shellcheck
+  # Debug: Show files in workspace
+  - task: Bash@3
+    displayName: 'Debug - List Files'
+    inputs:
+      targetType: 'inline'
+      script: |
+        echo "Current Directory: $(pwd)"
+        echo "Files in workspace:"
+        ls -la
+        echo "----------------------------------------"
 
-          - task: Bash@3
-            displayName: Lint shell script
-            inputs:
-              targetType: inline
-              script: shellcheck scripts/create-app-registration.sh
+  # Install yq
+  - task: Bash@3
+    displayName: 'Install yq'
+    inputs:
+      targetType: 'inline'
+      script: |
+        if ! command -v yq &> /dev/null; then
+          echo "Installing yq..."
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
+          sudo chmod +x /usr/local/bin/yq
+        fi
 
-  # ── Stage 2: Deploy ───────────────────────────────────────────────
-  - stage: Deploy
-    displayName: Deploy
-    dependsOn: Validate
-    jobs:
-      - deployment: CreateAppRegistration
-        displayName: Create App Registration
-        pool:
-          vmImage: ubuntu-latest
-        environment: ${{ parameters.environment }}   # ← enables approval gates
-        strategy:
-          runOnce:
-            deploy:
-              steps:
+  # Load Config with validation
+  - task: Bash@3
+    displayName: 'Load Config from Git'
+    inputs:
+      targetType: 'inline'
+      script: |
+        CONFIG_FILE="$(Build.SourcesDirectory)/${{ parameters.configFile }}"
 
-                - checkout: self
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "❌ ERROR: Config file '$CONFIG_FILE' not found!"
+          echo "Make sure the file exists in the root of your repository and has been committed."
+          echo "Current files:"
+          ls -la
+          exit 1
+        fi
 
-                - task: AzureCLI@2
-                  displayName: Login & Create App Registration
-                  name: appRegStep
-                  inputs:
-                    azureSubscription: 'sc-appreg-pipeline'
-                    scriptType: bash
-                    scriptLocation: scriptPath
-                    scriptPath: scripts/create-app-registration.sh
-                    arguments: '$(appDisplayName) ${{ parameters.environment }}'
-                  env:
-                    AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)
-                    AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)
-                    AZURE_TENANT_ID: $(AZURE_TENANT_ID)
+        echo "✅ Config file found: $CONFIG_FILE"
+        echo "=========================================="
+        cat "$CONFIG_FILE"
+        echo "=========================================="
 
-                - task: Bash@3
-                  displayName: Print App ID
-                  inputs:
-                    targetType: inline
-                    script: echo "App Registration ID → $(appRegStep.APP_ID)"
+  # Create/Update App Registration
+  - task: AzureCLI@2
+    displayName: 'Create/Update App Registration'
+    inputs:
+      azureSubscription: '$(azureServiceConnection)'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        CONFIG_FILE="$(Build.SourcesDirectory)/${{ parameters.configFile }}"
+
+        APP_DISPLAY_NAME=$(yq '.appDisplayName' "$CONFIG_FILE")
+        SIGN_IN_AUDIENCE=$(yq '.signInAudience' "$CONFIG_FILE")
+        REDIRECT_URIS=$(yq '.redirectUris' "$CONFIG_FILE")
+        API_PERMISSIONS=$(yq '.apiPermissions' "$CONFIG_FILE")
+
+        echo "Deploying App Registration: $APP_DISPLAY_NAME"
+
+        existingApp=$(az ad app list --filter "displayName eq '$APP_DISPLAY_NAME'" --query "[0].appId" -o tsv)
+
+        if [ -z "$existingApp" ]; then
+          echo "🆕 Creating new App Registration..."
+          appId=$(az ad app create \
+            --display-name "$APP_DISPLAY_NAME" \
+            --sign-in-audience "$SIGN_IN_AUDIENCE" \
+            --web-redirect-uris $REDIRECT_URIS \
+            --query appId -o tsv)
+        else
+          echo "🔄 Updating existing App Registration..."
+          appId=$existingApp
+          az ad app update \
+            --id $appId \
+            --display-name "$APP_DISPLAY_NAME" \
+            --sign-in-audience "$SIGN_IN_AUDIENCE" \
+            --web-redirect-uris $REDIRECT_URIS
+        fi
+
+        echo "##vso[task.setvariable variable=APP_ID]$appId"
+        echo "✅ App ID = $appId"

@@ -1,0 +1,4 @@
+appDisplayName: "IronClaw"
+signInAudience: "AzureADMyOrg"
+redirectUris: "https://localhost:4200 https://myapp.azurewebsites.net/signin-oidc"
+apiPermissions: "User.Read openid profile offline_access"
