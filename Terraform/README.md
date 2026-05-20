@@ -74,10 +74,6 @@ your-repo/
     ├── variables.tf
     ├── outputs.tf
     ├── backend.tf
-    └── environments/
-        ├── dev.tfvars
-        ├── staging.tfvars
-        └── prod.tfvars
 ```
 ### terraform/backend.tf
 ```bash
@@ -105,7 +101,7 @@ provider "azuread" {}
 
 # App Registration
 resource "azuread_application" "app" {
-  display_name     = "${var.app_name}-${var.environment}"
+  display_name     = "${var.app_name}"
   sign_in_audience = "AzureADMyOrg"
 
   api {
@@ -128,7 +124,7 @@ resource "azuread_application" "app" {
     }
   }
 
-  tags = ["environment:${var.environment}", "managed-by:terraform"]
+  tags = ["environment:" "managed-by:terraform"]
 }
 
 # Service Principal
@@ -149,23 +145,16 @@ resource "azuread_application_password" "app" {
 ```
 ### terraform/variables.tf
 ```bash
-variable "environment" {
-  description = "Deployment environment"
-  type        = string
-  validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be dev, staging, or prod."
-  }
-}
-
 variable "app_name" {
-  description = "Base name of the application"
+  description = "Display name of the app registration"
   type        = string
+  default     = "terraform-ironclaw"
 }
 
 variable "oauth_scope_id" {
   description = "UUID for the OAuth2 permission scope"
   type        = string
+  default     = "00000000-0000-0000-0000-000000000001"
 }
 ```
 ### terraform/outputs.tf

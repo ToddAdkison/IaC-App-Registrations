@@ -12,7 +12,7 @@ provider "azuread" {
 }
 
 resource "azuread_application" "app" {
-  display_name     = "${var.app_name}-${var.environment}"
+  display_name     = "${var.app_name}"
   sign_in_audience = "AzureADMyOrg"
 
   api {
@@ -35,7 +35,7 @@ resource "azuread_application" "app" {
     }
   }
 
-  tags = ["environment:${var.environment}", "managed-by:terraform"]
+  tags = ["environment: managed-by:terraform"]
 }
 
 resource "azuread_service_principal" "app" {
